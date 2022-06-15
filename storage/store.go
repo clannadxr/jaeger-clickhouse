@@ -14,23 +14,24 @@ import (
 	"text/template"
 
 	jaegerclickhouse "github.com/jaegertracing/jaeger-clickhouse"
+	"github.com/jaegertracing/jaeger-clickhouse/storage/clickhousedependencystore"
 
-	clickhouse "github.com/ClickHouse/clickhouse-go"
-	hclog "github.com/hashicorp/go-hclog"
+	"github.com/ClickHouse/clickhouse-go"
+	"github.com/hashicorp/go-hclog"
 	"github.com/jaegertracing/jaeger/plugin/storage/grpc/shared"
 	"github.com/jaegertracing/jaeger/storage/dependencystore"
 	"github.com/jaegertracing/jaeger/storage/spanstore"
 
-	"github.com/jaegertracing/jaeger-clickhouse/storage/clickhousedependencystore"
 	"github.com/jaegertracing/jaeger-clickhouse/storage/clickhousespanstore"
 )
 
 type Store struct {
-	db            *sql.DB
-	writer        spanstore.Writer
-	reader        spanstore.Reader
-	archiveWriter spanstore.Writer
-	archiveReader spanstore.Reader
+	db               *sql.DB
+	writer           spanstore.Writer
+	reader           spanstore.Reader
+	archiveWriter    spanstore.Writer
+	archiveReader    spanstore.Reader
+	dependencyReader dependencystore.Reader
 }
 
 const (
@@ -95,6 +96,10 @@ func NewStore(logger hclog.Logger, cfg Configuration) (*Store, error) {
 				cfg.Tenant,
 				cfg.MaxNumSpans,
 			),
+			dependencyReader: clickhousedependencystore.NewDependencyReader(
+				db,
+				cfg.DependenciesTable,
+			),
 		}, nil
 	}
 	return &Store{
@@ -136,6 +141,10 @@ func NewStore(logger hclog.Logger, cfg Configuration) (*Store, error) {
 			cfg.Tenant,
 			cfg.MaxNumSpans,
 		),
+		dependencyReader: clickhousedependencystore.NewDependencyReader(
+			db,
+			cfg.DependenciesTable,
+		),
 	}, nil
 }
 
@@ -173,9 +182,11 @@ type tableArgs struct {
 	SpansTable        clickhousespanstore.TableName
 	OperationsTable   clickhousespanstore.TableName
 	SpansArchiveTable clickhousespanstore.TableName
+	DependenciesTable clickhousespanstore.TableName
 
-	TTLTimestamp string
-	TTLDate      string
+	TTLTimestamp    string
+	TTLDate         string
+	TTLDependencies string
 
 	Multitenant bool
 	Replication bool
@@ -198,13 +209,17 @@ func render(templates *template.Template, filename string, args interface{}) str
 
 func runInitScripts(logger hclog.Logger, db *sql.DB, cfg Configuration) error {
 	var (
-		sqlStatements []string
-		ttlTimestamp  string
-		ttlDate       string
+		sqlStatements   []string
+		ttlTimestamp    string
+		ttlDate         string
+		ttlDependencies string
 	)
 	if cfg.TTLDays > 0 {
 		ttlTimestamp = fmt.Sprintf("TTL timestamp + INTERVAL %d DAY DELETE", cfg.TTLDays)
 		ttlDate = fmt.Sprintf("TTL date + INTERVAL %d DAY DELETE", cfg.TTLDays)
+	}
+	if cfg.TTLDaysDependencies > 0 {
+		ttlDependencies = fmt.Sprintf("TTL timestamp + INTERVAL %d DAY DELETE", cfg.TTLDaysDependencies)
 	}
 	if cfg.InitSQLScriptsDir != "" {
 		filePaths, err := walkMatch(cfg.InitSQLScriptsDir, "*.sql")
@@ -230,9 +245,11 @@ func runInitScripts(logger hclog.Logger, db *sql.DB, cfg Configuration) error {
 			SpansTable:        cfg.SpansTable,
 			OperationsTable:   cfg.OperationsTable,
 			SpansArchiveTable: cfg.GetSpansArchiveTable(),
+			DependenciesTable: cfg.DependenciesTable,
 
-			TTLTimestamp: ttlTimestamp,
-			TTLDate:      ttlDate,
+			TTLTimestamp:    ttlTimestamp,
+			TTLDate:         ttlDate,
+			TTLDependencies: ttlDependencies,
 
 			Multitenant: cfg.Tenant != "",
 			Replication: cfg.Replication,
@@ -244,12 +261,14 @@ func runInitScripts(logger hclog.Logger, db *sql.DB, cfg Configuration) error {
 			args.SpansTable = args.SpansTable.ToLocal()
 			args.OperationsTable = args.OperationsTable.ToLocal()
 			args.SpansArchiveTable = args.SpansArchiveTable.ToLocal()
+			args.DependenciesTable = args.DependenciesTable.ToLocal()
 		}
 
 		sqlStatements = append(sqlStatements, render(templates, "jaeger-index.tmpl.sql", args))
 		sqlStatements = append(sqlStatements, render(templates, "jaeger-operations.tmpl.sql", args))
 		sqlStatements = append(sqlStatements, render(templates, "jaeger-spans.tmpl.sql", args))
 		sqlStatements = append(sqlStatements, render(templates, "jaeger-spans-archive.tmpl.sql", args))
+		sqlStatements = append(sqlStatements, render(templates, "jaeger-dependencies.tmpl.sql", args))
 
 		if cfg.Replication {
 			// Now these tables omit the "_local" suffix
@@ -269,6 +288,10 @@ func runInitScripts(logger hclog.Logger, db *sql.DB, cfg Configuration) error {
 			distargs.Table = cfg.OperationsTable
 			distargs.Hash = "rand()"
 			sqlStatements = append(sqlStatements, render(templates, "distributed-table.tmpl.sql", distargs))
+
+			distargs.Table = cfg.DependenciesTable
+			distargs.Hash = "rand()"
+			sqlStatements = append(sqlStatements, render(templates, "distributed-table.tmpl.sql", distargs))
 		}
 	}
 	return executeScripts(logger, sqlStatements, db)
@@ -283,7 +306,7 @@ func (s *Store) SpanWriter() spanstore.Writer {
 }
 
 func (s *Store) DependencyReader() dependencystore.Reader {
-	return clickhousedependencystore.NewDependencyStore()
+	return s.dependencyReader
 }
 
 func (s *Store) ArchiveSpanReader() spanstore.Reader {

@@ -20,9 +20,10 @@ const (
 	defaultMetricsEndpoint              = "localhost:9090"
 	defaultMaxNumSpans                  = 0
 
-	defaultSpansTable      clickhousespanstore.TableName = "jaeger_spans"
-	defaultSpansIndexTable clickhousespanstore.TableName = "jaeger_index"
-	defaultOperationsTable clickhousespanstore.TableName = "jaeger_operations"
+	defaultSpansTable        clickhousespanstore.TableName = "jaeger_spans"
+	defaultSpansIndexTable   clickhousespanstore.TableName = "jaeger_index"
+	defaultOperationsTable   clickhousespanstore.TableName = "jaeger_operations"
+	defaultDependenciesTable clickhousespanstore.TableName = "jaeger_dependencies"
 )
 
 type Configuration struct {
@@ -68,10 +69,14 @@ type Configuration struct {
 	// Span index table. Default "jaeger_index_local" or "jaeger_index" when replication is enabled.
 	SpansIndexTable clickhousespanstore.TableName `yaml:"spans_index_table"`
 	// Operations table. Default "jaeger_operations_local" or "jaeger_operations" when replication is enabled.
-	OperationsTable   clickhousespanstore.TableName `yaml:"operations_table"`
+	OperationsTable clickhousespanstore.TableName `yaml:"operations_table"`
+	// Dependencies table. Default "jaeger_dependencies_local" or "jaeger_dependencies" when replication is enabled.
+	DependenciesTable clickhousespanstore.TableName `yaml:"dependencies_table"`
 	spansArchiveTable clickhousespanstore.TableName
 	// TTL for data in tables in days. If 0, no TTL is set. Default 0.
 	TTLDays uint `yaml:"ttl"`
+	// TTL for dependencies table in days.
+	TTLDaysDependencies uint `yaml:"ttl_dependencies"`
 	// The maximum number of spans to fetch per trace. If 0, no limits is set. Default 0.
 	MaxNumSpans uint `yaml:"max_num_spans"`
 }
@@ -134,6 +139,13 @@ func (cfg *Configuration) setDefaults() {
 			cfg.OperationsTable = defaultOperationsTable
 		} else {
 			cfg.OperationsTable = defaultOperationsTable.ToLocal()
+		}
+	}
+	if cfg.DependenciesTable == "" {
+		if cfg.Replication {
+			cfg.DependenciesTable = defaultDependenciesTable
+		} else {
+			cfg.DependenciesTable = defaultDependenciesTable.ToLocal()
 		}
 	}
 }
