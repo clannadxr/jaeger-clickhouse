@@ -27,7 +27,7 @@ func NewDependencyReader(db *sql.DB, dependenciesTable clickhousespanstore.Table
 }
 
 func (d *DependencyReader) GetDependencies(ctx context.Context, endTs time.Time, lookback time.Duration) ([]model.DependencyLink, error) {
-	query := fmt.Sprintf(`SELECT timestamp,max(call_count) as call_count,parent,child 
+	query := fmt.Sprintf(`SELECT timestamp,argMax(call_count, time) as call_count,parent,child 
 FROM %s 
 WHERE timestamp <= ? and timestamp >= ? 
 GROUP BY timestamp, parent, child`, d.dependenciesTable)

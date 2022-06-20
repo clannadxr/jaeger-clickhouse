@@ -7,8 +7,17 @@ CREATE TABLE IF NOT EXISTS {{.DependenciesTable}}
     timestamp DateTime CODEC (Delta, ZSTD(1)),
     parent   String CODEC (ZSTD(1)),
     child   String CODEC (ZSTD(1)),
-    call_count   UInt64 CODEC (ZSTD(1))
-) ENGINE {{if .Replication}}ReplicatedReplacingMergeTree(call_count){{else}}ReplacingMergeTree(call_count){{end}}
+    call_count   UInt64 CODEC (ZSTD(1)),
+    server_duration_p50 Float64 CODEC (ZSTD(1)),
+    server_duration_p90 Float64 CODEC (ZSTD(1)),
+    server_duration_p99 Float64 CODEC (ZSTD(1)),
+    client_duration_p50 Float64 CODEC (ZSTD(1)),
+    client_duration_p90 Float64 CODEC (ZSTD(1)),
+    client_duration_p99 Float64 CODEC (ZSTD(1)),
+    server_success_rate Float64 CODEC (ZSTD(1)),
+    client_success_rate Float64 CODEC (ZSTD(1)),
+    time DateTime CODEC (Delta, ZSTD(1))
+) ENGINE {{if .Replication}}ReplicatedReplacingMergeTree(time){{else}}ReplacingMergeTree(time){{end}}
     {{.TTLDependencies}}
     PARTITION BY (
         {{if .Multitenant -}}
